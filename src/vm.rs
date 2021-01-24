@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 pub struct VirtualMachine {
     memory: Rc<RefCell<Memory>>,
-    cpu: CPU,
+    pub cpu: CPU,
 }
 
 #[derive(Debug)]

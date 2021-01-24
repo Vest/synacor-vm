@@ -15,6 +15,7 @@ pub struct CPU {
     registers: [u16; MAX_REGISTERS],
     stack: LinkedList<u16>,
 
+    current_address: u16,
 }
 
 impl CPU {
@@ -23,6 +24,8 @@ impl CPU {
             memory: mem,
             registers: [0; MAX_REGISTERS],
             stack: LinkedList::new(),
+
+            current_address: 0,
         }
     }
 
@@ -67,6 +70,33 @@ impl CPU {
 
     pub fn pop(&mut self) -> Option<u16> {
         self.stack.pop_back()
+    }
+
+    pub fn execute(&mut self) {
+        loop {
+            let op_code = self.memory.borrow()
+                .read_memory(self.current_address)
+                .unwrap();
+
+            match op_code {
+                0 => break,
+                19 => {
+                    self.current_address += 1;
+
+                    print!("{}", ((self.memory.borrow()
+                        .read_memory(self.current_address)
+                        .unwrap() as u32)
+                        as u8) as char);
+                }
+                21 => {
+
+                }
+
+                _ => break,
+            }
+
+            self.current_address += 1;
+        }
     }
 }
 

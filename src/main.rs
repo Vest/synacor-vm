@@ -14,4 +14,6 @@ fn main() {
             Vec::new()
         })
     }).expect("The file 'challenge.bin' couldn't be loaded");
+
+    vm.cpu.execute();
 }
