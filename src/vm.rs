@@ -60,6 +60,7 @@ impl From<MemoryError> for VirtualMachineError {
 mod tests {
     use super::*;
     use std::io;
+    use std::path::PathBuf;
 
     #[test]
     fn test_binary_to_memory_default() {
@@ -98,10 +99,12 @@ mod tests {
 
     #[test]
     fn test_get_binary_from_path_small() -> io::Result<()> {
-        let path = "test\\small_sample.bin";
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("test/small_sample.bin");
+        let path = path.to_str().unwrap();
 
         let binary = VirtualMachine::get_binary_from_path(path)
-            .expect("The file must exist");
+            .expect(format!("The file must exist: {}", path).as_str());
         assert_eq!(binary.len() as u64, fs::metadata(path)?.len() / 2); // length in u8 divided by 2
         assert_eq!(binary[0], 0x0015);
         assert_eq!(binary[1], 0x0015);
@@ -113,8 +116,6 @@ mod tests {
 
     #[test]
     fn test_load_binary_small() {
-        let path = "test\\small_sample.bin";
-
         let mut vm = VirtualMachine::default();
         let result = vm.load_binary(|| {
             vec![0x0015, 0x0015, 0x0013, 0x0057]
@@ -128,7 +129,9 @@ mod tests {
 
     #[test]
     fn test_load_binary_big() {
-        let path = "test\\small_sample.bin";
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("test/small_sample.bin");
+        let path = path.to_str().unwrap();
 
         let mut vm = VirtualMachine::default();
         let result = vm.load_binary(|| {

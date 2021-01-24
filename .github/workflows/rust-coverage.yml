@@ -1,0 +1,59 @@
+name: Rust (coverage)
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        rust: [nightly]
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+
+    - name: Install a minimal Rust (nightly)
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: ${{ matrix.rust }}
+        default: true
+        override: true
+
+    - name: Clean build folder
+      uses: actions-rs/cargo@v1
+      with:
+        command: clean
+
+    - name: Run all tests
+      uses: actions-rs/cargo@v1
+      with:
+        command: test
+        args: --all-features --no-fail-fast -- --include-ignored -Z unstable-options
+      env:
+        CARGO_INCREMENTAL: '0'
+        RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+        RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+
+    - id: coverage
+      name: grcov
+      uses: actions-rs/grcov@v0.1
+
+    - name: codecov upload
+      uses: codecov/codecov-action@master
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ${{ steps.coverage.outputs.report }}
+        verbose: false
