@@ -3,12 +3,11 @@ use std::collections::LinkedList;
 const MAX_ADDRESS: usize = 0x8000;
 const MAX_REGISTERS: usize = 8;
 
-pub enum ErrorKind {
+pub enum MemoryError {
     DataIsTooLarge(usize),
     OverflowAddress(u16),
     OverflowRegister(u8),
 }
-
 
 pub struct Memory {
     memory: [u16; MAX_ADDRESS],
@@ -27,9 +26,9 @@ impl Default for Memory {
 }
 
 impl Memory {
-    pub fn load_data(&mut self, data: &[u16]) -> Result<(), ErrorKind> {
+    pub fn load_data(&mut self, data: &[u16]) -> Result<(), MemoryError> {
         if data.len() > self.memory.len() {
-            return Err(ErrorKind::DataIsTooLarge(data.len()));
+            return Err(MemoryError::DataIsTooLarge(data.len()));
         }
 
         self.memory[..data.len()].copy_from_slice(data);
@@ -37,14 +36,14 @@ impl Memory {
         Ok(())
     }
 
-    pub fn set_value(&mut self, address: u16, value: u16) -> Result<u16, ErrorKind> {
+    pub fn set_value(&mut self, address: u16, value: u16) -> Result<u16, MemoryError> {
         match address {
             0..=0x7FFF => self.write_memory(address, value),
             0x8000..=0x8007 => {
                 let reg_num = get_registry_from_address(address).unwrap();
                 self.write_register(reg_num, value)
             }
-            _ => Err(ErrorKind::OverflowAddress(address)),
+            _ => Err(MemoryError::OverflowAddress(address)),
         }
     }
 
@@ -55,7 +54,7 @@ impl Memory {
         }
     }
 
-    pub fn write_memory(&mut self, address: u16, value: u16) -> Result<u16, ErrorKind> {
+    pub fn write_memory(&mut self, address: u16, value: u16) -> Result<u16, MemoryError> {
         match address {
             0..=0x7FFF if address < MAX_ADDRESS as u16 => {
                 let old_value = self.memory[address as usize];
@@ -63,7 +62,7 @@ impl Memory {
 
                 Ok(old_value)
             }
-            _ => Err(ErrorKind::OverflowAddress(address)),
+            _ => Err(MemoryError::OverflowAddress(address)),
         }
     }
 
@@ -74,7 +73,7 @@ impl Memory {
         }
     }
 
-    pub fn write_register(&mut self, number: u8, value: u16) -> Result<u16, ErrorKind> {
+    pub fn write_register(&mut self, number: u8, value: u16) -> Result<u16, MemoryError> {
         match number {
             0..=7 => {
                 let old_value = self.registers[number as usize];
@@ -82,7 +81,7 @@ impl Memory {
 
                 Ok(old_value)
             }
-            _ => Err(ErrorKind::OverflowRegister(number)),
+            _ => Err(MemoryError::OverflowRegister(number)),
         }
     }
 
@@ -127,7 +126,7 @@ mod tests {
         assert_eq!(mem.memory[0..4], [0, 0, 0, 0]);
         assert!(res.is_err());
 
-        if let ErrorKind::DataIsTooLarge(current_length) = res.expect_err("Overflow must occur") {
+        if let MemoryError::DataIsTooLarge(current_length) = res.expect_err("Overflow must occur") {
             assert_eq!(current_length, MAX_ADDRESS + 1);
         }
     }
@@ -158,7 +157,7 @@ mod tests {
         mem.set_value(0x8000 + 4, 16).ok();
         assert_eq!(mem.registers[4], 16);
 
-        if let ErrorKind::OverflowAddress(address) = mem.set_value(0x9000, 16).expect_err("Overflow must occur") {
+        if let MemoryError::OverflowAddress(address) = mem.set_value(0x9000, 16).expect_err("Overflow must occur") {
             assert_eq!(address, 0x9000);
         }
     }
@@ -214,7 +213,7 @@ mod tests {
         mem.write_memory(0x0123, 1234).ok();
         assert_eq!(mem.memory[0x0123], 1234);
 
-        if let ErrorKind::OverflowAddress(address) = mem.write_memory(0x9000, 16).expect_err("Overflow must occur") {
+        if let MemoryError::OverflowAddress(address) = mem.write_memory(0x9000, 16).expect_err("Overflow must occur") {
             assert_eq!(address, 0x9000);
         }
     }
@@ -226,7 +225,7 @@ mod tests {
         mem.write_register(4, 1234).ok();
         assert_eq!(mem.registers[4], 1234);
 
-        if let ErrorKind::OverflowRegister(number) = mem.write_register(0x10, 16).expect_err("Overflow must occur") {
+        if let MemoryError::OverflowRegister(number) = mem.write_register(0x10, 16).expect_err("Overflow must occur") {
             assert_eq!(number, 0x10);
         }
     }
