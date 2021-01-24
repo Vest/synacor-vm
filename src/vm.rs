@@ -1,9 +1,13 @@
 use std::fs;
 use std::io::{ErrorKind};
 use crate::mem::{Memory, MemoryError};
+use crate::cpu::{CPU};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub struct VirtualMachine {
-    memory: Memory,
+    memory: Rc<RefCell<Memory>>,
+    cpu: CPU,
 }
 
 #[derive(Debug)]
@@ -14,8 +18,10 @@ pub enum VirtualMachineError {
 
 impl Default for VirtualMachine {
     fn default() -> Self {
+        let mem = Rc::new(RefCell::new(Memory::default()));
         VirtualMachine {
-            memory: Memory::default(),
+            memory: Rc::clone(&mem),
+            cpu: CPU::new(Rc::clone(&mem)),
         }
     }
 }
@@ -24,7 +30,8 @@ impl VirtualMachine {
     pub fn load_binary<F>(&mut self, fn_get_binary: F) -> Result<(), VirtualMachineError>
         where F: FnOnce() -> Vec<u16> {
         let u16_binary = fn_get_binary();
-        self.memory.load_data(&u16_binary)?;
+        self.memory.borrow_mut()
+            .load_data(&u16_binary)?;
 
         Ok(())
     }
@@ -117,24 +124,22 @@ mod tests {
     #[test]
     fn test_load_binary_small() {
         let mut vm = VirtualMachine::default();
-        let result = vm.load_binary(|| {
+        let _ = vm.load_binary(|| {
             vec![0x0015, 0x0015, 0x0013, 0x0057]
         }).expect("The binary should load without errors");
 
-        assert_eq!(vm.memory.read_memory(0), Some(0x0015));
-        assert_eq!(vm.memory.read_memory(1), Some(0x0015));
-        assert_eq!(vm.memory.read_memory(2), Some(0x0013));
-        assert_eq!(vm.memory.read_memory(3), Some(0x0057));
+        let vm_memory = vm.memory.borrow();
+        assert_eq!(vm_memory.read_memory(0), Some(0x0015));
+        assert_eq!(vm_memory.read_memory(1), Some(0x0015));
+        assert_eq!(vm_memory.read_memory(2), Some(0x0013));
+        assert_eq!(vm_memory.read_memory(3), Some(0x0057));
     }
 
     #[test]
     fn test_load_binary_big() {
-        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        path.push("test/small_sample.bin");
-        let path = path.to_str().unwrap();
-
         let mut vm = VirtualMachine::default();
-        let result = vm.load_binary(|| {
+
+        vm.load_binary(|| {
             vec![0_u16; 32769]
         }).expect_err("The binary is too large. It should never succeed");
     }
