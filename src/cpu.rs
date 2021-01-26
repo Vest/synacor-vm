@@ -1,6 +1,7 @@
 use crate::mem::{Memory, MAX_ADDRESS};
 use std::cell::RefCell;
 use std::rc::Rc;
+use log::trace;
 
 const MAX_REGISTERS: usize = 8;
 
@@ -8,6 +9,7 @@ const MAX_REGISTERS: usize = 8;
 pub enum CPUError {
     OverflowAddress(u16),
     OverflowRegister(u8),
+    PopFromEmptyStack,
     UnknownOpCode { opcode: u16, address: u16 },
 }
 
@@ -131,26 +133,44 @@ impl CPU {
         }
     }
 
-    pub fn pop(&mut self) -> Option<u16> {
-        self.stack.pop()
-    }
-
     pub fn execute(&mut self) -> Result<(), CPUError> {
         loop {
             let op_code = self.get_value_from_address(self.current_address)?;
             let a = self.get_value_from_address(self.current_address + 1);
             let b = self.get_value_from_address(self.current_address + 2);
             let c = self.get_value_from_address(self.current_address + 3);
+            /*
+                        {
+                            let a = self.get_value_from_address(self.current_address + 1)?;
+                            let b = self.get_value_from_address(self.current_address + 2)?;
+                            let c = self.get_value_from_address(self.current_address + 3)?;
 
+                            println!("  Op: {:#02}, a: {:#06X} / {:#05}, b: {:#06X} / {:#05}, c: {:#06X} / {:#05}",
+                                     op_code,
+                                     a, self.from_raw_to_u16(a)?,
+                                     b, self.from_raw_to_u16(b)?,
+                                     c, self.from_raw_to_u16(c)?,
+                            );
+                        }
+            */
             let execution_result = match op_code {
                 0 => self.halt(),
                 1 => self.set(a?, b?),
                 2 => self.push(a?),
+                3 => self.pop(a?),
                 4 => self.eq(a?, b?, c?),
+                5 => self.gt(a?, b?, c?),
                 6 => self.jmp(a?),
                 7 => self.jt(a?, b?),
                 8 => self.jf(a?, b?),
                 9 => self.add(a?, b?, c?),
+                10 => self.mult(a?, b?, c?),
+                11 => self.modulo(a?, b?, c?),
+                12 => self.and(a?, b?, c?),
+                13 => self.or(a?, b?, c?),
+                14 => self.not(a?, b?),
+                15 => self.rmem(a?, b?),
+                17 => self.call(a?),
                 19 => self.out(a?),
                 21 => self.noop(),
 
@@ -172,11 +192,15 @@ impl CPU {
 
     // halt: 0 - stop execution and terminate the program
     fn halt(&self) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: halt!", self.current_address);
+
         Ok(ExecutionResult::Stop)
     }
 
     // set: 1 a b - set register <a> to the value of <b>
     fn set(&mut self, raw_a: u16, b: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: set ({:#06X}, {:#06X})", self.current_address, raw_a, b);
+
         let _ = self.set_value_in_address(raw_a, b)?;
 
         Ok(ExecutionResult::Next(3))
@@ -184,18 +208,48 @@ impl CPU {
 
     // push: 2 a - push <a> onto the stack
     fn push(&mut self, raw_a: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: push ({:#06X})", self.current_address, raw_a);
+
         let a = self.from_raw_to_u16(raw_a)?;
         self.stack.push(a);
 
         Ok(ExecutionResult::Next(2))
     }
 
+    // pop: 3 a - remove the top element from the stack and write it into <a>; empty stack = error
+    fn pop(&mut self, raw_a: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: pop ({:#06X})", self.current_address, raw_a);
+
+        if let Some(value) = self.stack.pop() {
+            self.set_value_in_address(raw_a, value)?;
+
+            Ok(ExecutionResult::Next(2))
+        } else {
+            Err(CPUError::PopFromEmptyStack)
+        }
+    }
+
     // eq: 4 a b c - set <a> to 1 if <b> is equal to <c>; set it to 0 otherwise
     fn eq(&mut self, raw_a: u16, raw_b: u16, raw_c: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: eq ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, raw_b, raw_c);
+
+        let b = self.from_raw_to_u16(raw_b)?;
+        let c = self.from_raw_to_u16(raw_c)?;
+        trace!("          b: {:#06X}, c: {:#06X}", b, c);
+
+        self.set_value_in_address(raw_a,
+                                  if b == c { 1 } else { 0 })?;
+        Ok(ExecutionResult::Next(4))
+    }
+
+    // gt: 5 a b c - set <a> to 1 if <b> is greater than <c>; set it to 0 otherwise
+    fn gt(&mut self, raw_a: u16, raw_b: u16, raw_c: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: gt ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, raw_b, raw_c);
+
         let b = self.from_raw_to_u16(raw_b)?;
         let c = self.from_raw_to_u16(raw_c)?;
 
-        if b == c {
+        if b > c {
             self.set_value_in_address(raw_a, 1)?;
         } else {
             self.set_value_in_address(raw_a, 0)?;
@@ -203,15 +257,19 @@ impl CPU {
         Ok(ExecutionResult::Next(4))
     }
 
-
     // jmp: 6 a - jump to <a>
     fn jmp(&self, a: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: jmp ({:#06X})", self.current_address, a);
+
         Ok(ExecutionResult::Jump(a))
     }
 
     // jt: 7 a b - if <a> is nonzero, jump to <b>
     fn jt(&self, raw_a: u16, b: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: jt ({:#06X}, {:#06X})", self.current_address, raw_a, b);
+
         let a = self.from_raw_to_u16(raw_a)?;
+        trace!("          a: {:#06X}", a);
 
         Ok(if a != 0 {
             ExecutionResult::Jump(b)
@@ -222,7 +280,10 @@ impl CPU {
 
     // jf: 8 a b - if <a> is zero, jump to <b>
     fn jf(&self, raw_a: u16, b: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: jf ({:#06X}, {:#06X})", self.current_address, raw_a, b);
+
         let a = self.from_raw_to_u16(raw_a)?;
+        trace!("          a: {:#06X}", a);
 
         Ok(if a == 0 {
             ExecutionResult::Jump(b)
@@ -233,14 +294,87 @@ impl CPU {
 
     // add: 9 a b c - assign into <a> the sum of <b> and <c> (modulo 32768)
     fn add(&mut self, raw_a: u16, b: u16, c: u16) -> Result<ExecutionResult, CPUError> {
-        let sum = b.wrapping_add(c);
+        trace!("{:#06X}: add ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, b, c);
+
+        let sum = b.wrapping_add(c) & 0x7FFF;
+        trace!("          res: {:#06X}", sum);
 
         self.set_value_in_address(raw_a, sum)?;
         Ok(ExecutionResult::Next(4))
     }
 
+    // mult: 10 a b c - store into <a> the product of <b> and <c> (modulo 32768)
+    fn mult(&mut self, raw_a: u16, b: u16, c: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: mult ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, b, c);
+
+        let mult = b.wrapping_mul(c) & 0x7FFF;
+        trace!("          res: {:#06X}", mult);
+
+        self.set_value_in_address(raw_a, mult)?;
+        Ok(ExecutionResult::Next(4))
+    }
+
+    // mod: 11 a b c - store into <a> the remainder of <b> divided by <c>
+    fn modulo(&mut self, raw_a: u16, b: u16, c: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: mod ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, b, c);
+
+        let rem = b.wrapping_rem(c);
+        trace!("          res: {:#06X}", rem);
+
+        self.set_value_in_address(raw_a, rem)?;
+        Ok(ExecutionResult::Next(4))
+    }
+
+    // and: 12 a b c - stores into <a> the bitwise and of <b> and <c>
+    fn and(&mut self, raw_a: u16, b: u16, c: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: and ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, b, c);
+
+        self.set_value_in_address(raw_a, b & c)?;
+        Ok(ExecutionResult::Next(4))
+    }
+
+    // or: 13 a b c - stores into <a> the bitwise or of <b> and <c>
+    fn or(&mut self, raw_a: u16, b: u16, c: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: or ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, b, c);
+
+        self.set_value_in_address(raw_a, b | c)?;
+        Ok(ExecutionResult::Next(4))
+    }
+
+    // not: 14 a b - stores 15-bit bitwise inverse of <b> in <a>
+    fn not(&mut self, raw_a: u16, b: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: not ({:#06X}, {:#06X})", self.current_address, raw_a, b);
+
+        self.set_value_in_address(raw_a, !b & 0x7FFF)?;
+        Ok(ExecutionResult::Next(3))
+    }
+
+    // rmem: 15 a b - read memory at address <b> and write it to <a>
+    fn rmem(&mut self, raw_a: u16, b: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: rmem ({:#06X}, {:#06X})", self.current_address, raw_a, b);
+
+        let raw_value = self.get_value_from_address(b)?;
+        let value = self.from_raw_to_u16(raw_value)?;
+        trace!("          res: {:#06X}", value);
+
+        self.set_value_in_address(raw_a, value)?;
+        Ok(ExecutionResult::Next(3))
+    }
+
+    // call: 17 a - write the address of the next instruction to the stack and jump to <a>
+    fn call(&mut self, raw_a: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: call ({:#06X})", self.current_address, raw_a);
+
+        let a = self.from_raw_to_u16(raw_a)?;
+
+        self.stack.push(self.current_address + 2);
+        Ok(ExecutionResult::Jump(a))
+    }
+
     // out: 19 a - write the character represented by ascii code <a> to the terminal
     fn out(&self, a: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: out ({:#06X})", self.current_address, a);
+
         let a = (a as u8) as char;
 
         print!("{}", a);
@@ -250,6 +384,8 @@ impl CPU {
 
     // noop: 21 - no operation
     fn noop(&self) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: noop", self.current_address);
+
         Ok(ExecutionResult::Next(1))
     }
 }

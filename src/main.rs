@@ -5,6 +5,10 @@ mod mem;
 mod cpu;
 
 fn main() {
+    env_logger::builder()
+        .format_timestamp(None)
+        .init();
+
     println!("Let's start the VM!!!!");
 
     let mut vm = vm::VirtualMachine::default();
