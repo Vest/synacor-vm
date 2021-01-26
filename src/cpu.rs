@@ -10,6 +10,12 @@ pub enum CPUError {
     OverflowRegister(u8),
 }
 
+enum ExecutionResult {
+    Stop,
+    Jump(u16),
+    Next(u16),
+}
+
 pub struct CPU {
     memory: Rc<RefCell<Memory>>,
     registers: [u16; MAX_REGISTERS],
@@ -29,13 +35,30 @@ impl CPU {
         }
     }
 
+    pub fn get_value(&self, address: u16) -> Result<u16, CPUError> {
+        match address {
+            0..=0x7FFF => {
+                self.memory.borrow()
+                    .read_memory(address)
+                    .ok_or(CPUError::OverflowAddress(address))
+            }
+            0x8000..=0x8007 => {
+                let reg_num = get_registry_from_address(address)
+                    .ok_or(CPUError::OverflowAddress(address))?;
+
+                self.read_register(reg_num)
+                    .ok_or(CPUError::OverflowRegister(reg_num))
+            }
+            _ => Err(CPUError::OverflowAddress(address)),
+        }
+    }
+
     pub fn set_value(&mut self, address: u16, value: u16) -> Result<u16, CPUError> {
         match address {
             0..=0x7FFF => {
-                match self.memory.borrow_mut().write_memory(address, value) {
-                    Ok(old_value) => Ok(old_value),
-                    Err(_) => Err(CPUError::OverflowAddress(address)),
-                }
+                self.memory.borrow_mut()
+                    .write_memory(address, value)
+                    .or(Err(CPUError::OverflowAddress(address)))
             }
             0x8000..=0x8007 => {
                 let reg_num = get_registry_from_address(address).unwrap();
@@ -72,31 +95,52 @@ impl CPU {
         self.stack.pop_back()
     }
 
-    pub fn execute(&mut self) {
+    pub fn execute(&mut self) -> Result<(), CPUError> {
         loop {
-            let op_code = self.memory.borrow()
-                .read_memory(self.current_address)
-                .unwrap();
+            let (op_code, a, b, c) = {
+                let op_code = self.get_value(self.current_address)?;
+                let mem_a = self.get_value(self.current_address + 1);
+                let mem_b = self.get_value(self.current_address + 2);
+                let mem_c = self.get_value(self.current_address + 3);
 
-            match op_code {
-                0 => break,
-                19 => {
-                    self.current_address += 1;
+                (op_code, mem_a, mem_b, mem_c)
+            };
 
-                    print!("{}", ((self.memory.borrow()
-                        .read_memory(self.current_address)
-                        .unwrap() as u32)
-                        as u8) as char);
-                }
-                21 => {
+            let execution_result = match op_code {
+                0 => self.halt(),
+                19 => self.out(a?),
+                21 => self.noop(),
 
-                }
+                _ => ExecutionResult::Stop,
+            };
 
-                _ => break,
+            match execution_result {
+                ExecutionResult::Stop => break,
+                ExecutionResult::Jump(address) => self.current_address = address,
+                ExecutionResult::Next(size) => self.current_address += size,
             }
-
-            self.current_address += 1;
         }
+
+        Ok(())
+    }
+
+    // halt: 0 - stop execution and terminate the program
+    fn halt(&self) -> ExecutionResult {
+        ExecutionResult::Stop
+    }
+
+    // out: 19 a - write the character represented by ascii code <a> to the terminal
+    fn out(&self, a: u16) -> ExecutionResult {
+        let a = (a as u8) as char;
+
+        print!("{}", a);
+
+        ExecutionResult::Next(2)
+    }
+
+    // noop: 21 - no operation
+    fn noop(&self) -> ExecutionResult {
+        ExecutionResult::Next(1)
     }
 }
 

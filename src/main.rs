@@ -15,5 +15,5 @@ fn main() {
         })
     }).expect("The file 'challenge.bin' couldn't be loaded");
 
-    vm.cpu.execute();
+    let _ = vm.cpu.execute();
 }
