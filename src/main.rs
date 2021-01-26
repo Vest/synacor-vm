@@ -15,5 +15,10 @@ fn main() {
         })
     }).expect("The file 'challenge.bin' couldn't be loaded");
 
-    let _ = vm.cpu.execute();
+    vm.cpu.execute()
+        .unwrap_or_else(|err| {
+            eprintln!("Unexpected error: {:?}\n", err);
+
+            vm.cpu.dump_cpu();
+        })
 }

@@ -1,13 +1,14 @@
 use crate::mem::{Memory, MAX_ADDRESS};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::collections::LinkedList;
 
 const MAX_REGISTERS: usize = 8;
 
+#[derive(Debug)]
 pub enum CPUError {
     OverflowAddress(u16),
     OverflowRegister(u8),
+    UnknownOpCode { opcode: u16, address: u16 },
 }
 
 enum ExecutionResult {
@@ -19,7 +20,7 @@ enum ExecutionResult {
 pub struct CPU {
     memory: Rc<RefCell<Memory>>,
     registers: [u16; MAX_REGISTERS],
-    stack: LinkedList<u16>,
+    stack: Vec<u16>,
 
     current_address: u16,
 }
@@ -29,13 +30,41 @@ impl CPU {
         CPU {
             memory: mem,
             registers: [0; MAX_REGISTERS],
-            stack: LinkedList::new(),
+            stack: Vec::new(),
 
             current_address: 0,
         }
     }
 
-    pub fn get_value(&self, address: u16) -> Result<u16, CPUError> {
+    pub fn dump_cpu(&self) {
+        println!("--- Registers ---");
+        self.registers.iter()
+            .enumerate()
+            .for_each(|(idx, value)| {
+                println!("reg {}: {:#06X}", idx, value);
+            });
+        println!();
+        println!("--- Stack ---");
+        println!("top ---");
+        self.stack.iter()
+            .rev()
+            .for_each(|value| {
+                println!("{:#06X}", value);
+            });
+        println!("--- bottom");
+        /*
+                println!("--- Memory ---");
+                let mem = self.memory.borrow();
+                (0..0x8000_u16).for_each(|address| {
+                    if address % 16 == 0 { println!(); }
+                    if address % 0x1000 == 0 { println!("--------------------------"); }
+                    print!("{:#06X} ", mem.read_memory(address).unwrap());
+                });
+
+         */
+    }
+
+    pub fn get_value_from_address(&self, address: u16) -> Result<u16, CPUError> {
         match address {
             0..=0x7FFF => {
                 self.memory.borrow()
@@ -53,7 +82,7 @@ impl CPU {
         }
     }
 
-    pub fn set_value(&mut self, address: u16, value: u16) -> Result<u16, CPUError> {
+    pub fn set_value_in_address(&mut self, address: u16, value: u16) -> Result<u16, CPUError> {
         match address {
             0..=0x7FFF => {
                 self.memory.borrow_mut()
@@ -61,7 +90,8 @@ impl CPU {
                     .or(Err(CPUError::OverflowAddress(address)))
             }
             0x8000..=0x8007 => {
-                let reg_num = get_registry_from_address(address).unwrap();
+                let reg_num = get_registry_from_address(address)
+                    .ok_or(CPUError::OverflowAddress(address))?;
                 self.write_register(reg_num, value)
             }
             _ => Err(CPUError::OverflowAddress(address)),
@@ -87,34 +117,50 @@ impl CPU {
         }
     }
 
-    pub fn push(&mut self, value: u16) {
-        self.stack.push_back(value);
+    fn from_raw_to_u16(&self, raw: u16) -> Result<u16, CPUError> {
+        match raw {
+            0..=0x7FFF => Ok(raw),
+            0x8000..=0x8007 => {
+                let reg_num = get_registry_from_address(raw)
+                    .ok_or(CPUError::OverflowAddress(raw))?;
+
+                self.read_register(reg_num)
+                    .ok_or(CPUError::OverflowRegister(reg_num))
+            }
+            _ => Err(CPUError::OverflowAddress(raw)),
+        }
     }
 
     pub fn pop(&mut self) -> Option<u16> {
-        self.stack.pop_back()
+        self.stack.pop()
     }
 
     pub fn execute(&mut self) -> Result<(), CPUError> {
         loop {
-            let (op_code, a, b, c) = {
-                let op_code = self.get_value(self.current_address)?;
-                let mem_a = self.get_value(self.current_address + 1);
-                let mem_b = self.get_value(self.current_address + 2);
-                let mem_c = self.get_value(self.current_address + 3);
-
-                (op_code, mem_a, mem_b, mem_c)
-            };
+            let op_code = self.get_value_from_address(self.current_address)?;
+            let a = self.get_value_from_address(self.current_address + 1);
+            let b = self.get_value_from_address(self.current_address + 2);
+            let c = self.get_value_from_address(self.current_address + 3);
 
             let execution_result = match op_code {
                 0 => self.halt(),
+                1 => self.set(a?, b?),
+                2 => self.push(a?),
+                4 => self.eq(a?, b?, c?),
+                6 => self.jmp(a?),
+                7 => self.jt(a?, b?),
+                8 => self.jf(a?, b?),
+                9 => self.add(a?, b?, c?),
                 19 => self.out(a?),
                 21 => self.noop(),
 
-                _ => ExecutionResult::Stop,
+                _ => Err(CPUError::UnknownOpCode {
+                    opcode: op_code,
+                    address: self.current_address,
+                }),
             };
 
-            match execution_result {
+            match execution_result? {
                 ExecutionResult::Stop => break,
                 ExecutionResult::Jump(address) => self.current_address = address,
                 ExecutionResult::Next(size) => self.current_address += size,
@@ -125,22 +171,86 @@ impl CPU {
     }
 
     // halt: 0 - stop execution and terminate the program
-    fn halt(&self) -> ExecutionResult {
-        ExecutionResult::Stop
+    fn halt(&self) -> Result<ExecutionResult, CPUError> {
+        Ok(ExecutionResult::Stop)
+    }
+
+    // set: 1 a b - set register <a> to the value of <b>
+    fn set(&mut self, raw_a: u16, b: u16) -> Result<ExecutionResult, CPUError> {
+        let _ = self.set_value_in_address(raw_a, b)?;
+
+        Ok(ExecutionResult::Next(3))
+    }
+
+    // push: 2 a - push <a> onto the stack
+    fn push(&mut self, raw_a: u16) -> Result<ExecutionResult, CPUError> {
+        let a = self.from_raw_to_u16(raw_a)?;
+        self.stack.push(a);
+
+        Ok(ExecutionResult::Next(2))
+    }
+
+    // eq: 4 a b c - set <a> to 1 if <b> is equal to <c>; set it to 0 otherwise
+    fn eq(&mut self, raw_a: u16, raw_b: u16, raw_c: u16) -> Result<ExecutionResult, CPUError> {
+        let b = self.from_raw_to_u16(raw_b)?;
+        let c = self.from_raw_to_u16(raw_c)?;
+
+        if b == c {
+            self.set_value_in_address(raw_a, 1)?;
+        } else {
+            self.set_value_in_address(raw_a, 0)?;
+        }
+        Ok(ExecutionResult::Next(4))
+    }
+
+
+    // jmp: 6 a - jump to <a>
+    fn jmp(&self, a: u16) -> Result<ExecutionResult, CPUError> {
+        Ok(ExecutionResult::Jump(a))
+    }
+
+    // jt: 7 a b - if <a> is nonzero, jump to <b>
+    fn jt(&self, raw_a: u16, b: u16) -> Result<ExecutionResult, CPUError> {
+        let a = self.from_raw_to_u16(raw_a)?;
+
+        Ok(if a != 0 {
+            ExecutionResult::Jump(b)
+        } else {
+            ExecutionResult::Next(3)
+        })
+    }
+
+    // jf: 8 a b - if <a> is zero, jump to <b>
+    fn jf(&self, raw_a: u16, b: u16) -> Result<ExecutionResult, CPUError> {
+        let a = self.from_raw_to_u16(raw_a)?;
+
+        Ok(if a == 0 {
+            ExecutionResult::Jump(b)
+        } else {
+            ExecutionResult::Next(3)
+        })
+    }
+
+    // add: 9 a b c - assign into <a> the sum of <b> and <c> (modulo 32768)
+    fn add(&mut self, raw_a: u16, b: u16, c: u16) -> Result<ExecutionResult, CPUError> {
+        let sum = b.wrapping_add(c);
+
+        self.set_value_in_address(raw_a, sum)?;
+        Ok(ExecutionResult::Next(4))
     }
 
     // out: 19 a - write the character represented by ascii code <a> to the terminal
-    fn out(&self, a: u16) -> ExecutionResult {
+    fn out(&self, a: u16) -> Result<ExecutionResult, CPUError> {
         let a = (a as u8) as char;
 
         print!("{}", a);
 
-        ExecutionResult::Next(2)
+        Ok(ExecutionResult::Next(2))
     }
 
     // noop: 21 - no operation
-    fn noop(&self) -> ExecutionResult {
-        ExecutionResult::Next(1)
+    fn noop(&self) -> Result<ExecutionResult, CPUError> {
+        Ok(ExecutionResult::Next(1))
     }
 }
 
@@ -174,7 +284,7 @@ mod tests {
         mem.load_data(&[3, 2, 1]).ok();
 
         let mut cpu = CPU::new(Rc::new(RefCell::new(mem)));
-        let old_value = cpu.set_value(0, 0).unwrap_or(u16::MAX);
+        let old_value = cpu.set_value_in_address(0, 0).unwrap_or(u16::MAX);
 
         assert_eq!(old_value, 3);
 
@@ -186,10 +296,10 @@ mod tests {
             assert_eq!(mem.read_memory(3), Some(0));
         }
 
-        cpu.set_value(0x8000 + 4, 16).ok();
+        cpu.set_value_in_address(0x8000 + 4, 16).ok();
         assert_eq!(cpu.registers[4], 16);
 
-        if let CPUError::OverflowAddress(address) = cpu.set_value(0x9000, 16).expect_err("Overflow must occur") {
+        if let CPUError::OverflowAddress(address) = cpu.set_value_in_address(0x9000, 16).expect_err("Overflow must occur") {
             assert_eq!(address, 0x9000);
         }
     }
