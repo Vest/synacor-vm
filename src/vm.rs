@@ -4,6 +4,7 @@ use crate::mem::{Memory, MemoryError};
 use crate::cpu::{CPU};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::iter::FromIterator;
 
 pub struct VirtualMachine {
     memory: Rc<RefCell<Memory>>,
@@ -45,6 +46,39 @@ impl VirtualMachine {
         }).and_then(|binary| {
             Ok(binary_to_memory(&binary))
         })
+    }
+
+    pub fn next_step(&mut self) -> Result<bool, VirtualMachineError> {
+        match self.cpu.execute() {
+            Ok(to_stop) => Ok(to_stop),
+            Err(_) => Err(VirtualMachineError::GeneralError)
+        }
+    }
+
+    pub fn run(&mut self) {
+        while let Ok(to_stop) = self.next_step() {
+            if to_stop {
+                break;
+            }
+        }
+    }
+
+    pub fn dump_registry(&self) {
+        println!(r#"--- Registers ---
+{}
+{}
+"#,
+                 String::from_iter((0..crate::cpu::MAX_REGISTERS as u8)
+                     .map(|reg_num| format!("{:#6} ", reg_num))),
+                 String::from_iter(
+                     (0..crate::cpu::MAX_REGISTERS as u8).
+                         filter_map(|reg_num| self.cpu.read_register(reg_num))
+                         .map(|reg_value| format!("{:#06X} ", reg_value))
+                 ));
+    }
+
+    pub fn get_current_address(&self) -> u16 {
+        self.cpu.get_current_address()
     }
 }
 

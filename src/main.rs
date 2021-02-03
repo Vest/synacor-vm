@@ -1,4 +1,6 @@
 use crate::vm::{VirtualMachine};
+use std::io::{self, Write};
+use std::process::exit;
 
 mod vm;
 mod mem;
@@ -19,10 +21,29 @@ fn main() {
         })
     }).expect("The file 'challenge.bin' couldn't be loaded");
 
-    vm.cpu.execute()
-        .unwrap_or_else(|err| {
-            eprintln!("Unexpected error: {:?}\n", err);
+    println!("Type 'exit' to hm... exit");
+    let mut buffer = String::new();
+    while let Ok(_) = io::stdin().read_line(&mut buffer) {
+        match buffer.trim_end() {
+            "exit" => break,
+            "regs" => vm.dump_registry(),
+            "where" => {
+                io::stdout().flush().unwrap();
+                println!("\n{0:#6} / {0:#06X}", vm.get_current_address());
+            }
+            "run" => vm.run(),
+            _ => {
+                match vm.next_step() {
+                    Ok(to_stop) if to_stop => break,
+                    Err(err) => {
+                        eprintln!("Unexpected error: {:?}\n", err);
+                        exit(-1);
+                    }
+                    _ => {}
+                }
+            }
+        }
 
-            vm.cpu.dump_cpu();
-        })
+        buffer.clear();
+    }
 }

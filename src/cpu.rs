@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use log::trace;
 
-const MAX_REGISTERS: usize = 8;
+pub const MAX_REGISTERS: usize = 8;
 
 #[derive(Debug)]
 pub enum CPUError {
@@ -38,34 +38,6 @@ impl CPU {
         }
     }
 
-    pub fn dump_cpu(&self) {
-        println!("--- Registers ---");
-        self.registers.iter()
-            .enumerate()
-            .for_each(|(idx, value)| {
-                println!("reg {}: {:#06X}", idx, value);
-            });
-        println!();
-        println!("--- Stack ---");
-        println!("top ---");
-        self.stack.iter()
-            .rev()
-            .for_each(|value| {
-                println!("{:#06X}", value);
-            });
-        println!("--- bottom");
-        /*
-                println!("--- Memory ---");
-                let mem = self.memory.borrow();
-                (0..0x8000_u16).for_each(|address| {
-                    if address % 16 == 0 { println!(); }
-                    if address % 0x1000 == 0 { println!("--------------------------"); }
-                    print!("{:#06X} ", mem.read_memory(address).unwrap());
-                });
-
-         */
-    }
-
     pub fn get_value_from_address(&self, address: u16) -> Result<u16, CPUError> {
         match address {
             0..=0x7FFF => {
@@ -82,6 +54,10 @@ impl CPU {
             }
             _ => Err(CPUError::OverflowAddress(address)),
         }
+    }
+
+    pub fn get_current_address(&self) -> u16 {
+        self.current_address
     }
 
     pub fn set_value_in_address(&mut self, address: u16, value: u16) -> Result<u16, CPUError> {
@@ -133,61 +109,59 @@ impl CPU {
         }
     }
 
-    pub fn execute(&mut self) -> Result<(), CPUError> {
-        loop {
-            let op_code = self.get_value_from_address(self.current_address)?;
-            let a = self.get_value_from_address(self.current_address + 1);
-            let b = self.get_value_from_address(self.current_address + 2);
-            let c = self.get_value_from_address(self.current_address + 3);
-            /*
-                        {
-                            let a = self.get_value_from_address(self.current_address + 1)?;
-                            let b = self.get_value_from_address(self.current_address + 2)?;
-                            let c = self.get_value_from_address(self.current_address + 3)?;
+    pub fn execute(&mut self) -> Result<bool, CPUError> {
+        let op_code = self.get_value_from_address(self.current_address)?;
+        let a = self.get_value_from_address(self.current_address + 1);
+        let b = self.get_value_from_address(self.current_address + 2);
+        let c = self.get_value_from_address(self.current_address + 3);
+        /*
+                    {
+                        let a = self.get_value_from_address(self.current_address + 1)?;
+                        let b = self.get_value_from_address(self.current_address + 2)?;
+                        let c = self.get_value_from_address(self.current_address + 3)?;
 
-                            println!("  Op: {:#02}, a: {:#06X} / {:#05}, b: {:#06X} / {:#05}, c: {:#06X} / {:#05}",
-                                     op_code,
-                                     a, self.from_raw_to_u16(a)?,
-                                     b, self.from_raw_to_u16(b)?,
-                                     c, self.from_raw_to_u16(c)?,
-                            );
-                        }
-            */
-            let execution_result = match op_code {
-                0 => self.halt(),
-                1 => self.set(a?, b?),
-                2 => self.push(a?),
-                3 => self.pop(a?),
-                4 => self.eq(a?, b?, c?),
-                5 => self.gt(a?, b?, c?),
-                6 => self.jmp(a?),
-                7 => self.jt(a?, b?),
-                8 => self.jf(a?, b?),
-                9 => self.add(a?, b?, c?),
-                10 => self.mult(a?, b?, c?),
-                11 => self.modulo(a?, b?, c?),
-                12 => self.and(a?, b?, c?),
-                13 => self.or(a?, b?, c?),
-                14 => self.not(a?, b?),
-                15 => self.rmem(a?, b?),
-                17 => self.call(a?),
-                19 => self.out(a?),
-                21 => self.noop(),
+                        println!("  Op: {:#02}, a: {:#06X} / {:#05}, b: {:#06X} / {:#05}, c: {:#06X} / {:#05}",
+                                 op_code,
+                                 a, self.from_raw_to_u16(a)?,
+                                 b, self.from_raw_to_u16(b)?,
+                                 c, self.from_raw_to_u16(c)?,
+                        );
+                    }
+        */
+        let execution_result = match op_code {
+            0 => self.halt(),
+            1 => self.set(a?, b?),
+            2 => self.push(a?),
+            3 => self.pop(a?),
+            4 => self.eq(a?, b?, c?),
+            5 => self.gt(a?, b?, c?),
+            6 => self.jmp(a?),
+            7 => self.jt(a?, b?),
+            8 => self.jf(a?, b?),
+            9 => self.add(a?, b?, c?),
+            10 => self.mult(a?, b?, c?),
+            11 => self.modulo(a?, b?, c?),
+            12 => self.and(a?, b?, c?),
+            13 => self.or(a?, b?, c?),
+            14 => self.not(a?, b?),
+            15 => self.rmem(a?, b?),
+            17 => self.call(a?),
+            19 => self.out(a?),
+            21 => self.noop(),
 
-                _ => Err(CPUError::UnknownOpCode {
-                    opcode: op_code,
-                    address: self.current_address,
-                }),
-            };
+            _ => Err(CPUError::UnknownOpCode {
+                opcode: op_code,
+                address: self.current_address,
+            }),
+        };
 
-            match execution_result? {
-                ExecutionResult::Stop => break,
-                ExecutionResult::Jump(address) => self.current_address = address,
-                ExecutionResult::Next(size) => self.current_address += size,
-            }
-        }
+        match execution_result? {
+            ExecutionResult::Stop => return Ok(true),
+            ExecutionResult::Jump(address) => self.current_address = address,
+            ExecutionResult::Next(size) => self.current_address += size,
+        };
 
-        Ok(())
+        Ok(false)
     }
 
     // halt: 0 - stop execution and terminate the program
@@ -239,6 +213,7 @@ impl CPU {
 
         self.set_value_in_address(raw_a,
                                   if b == c { 1 } else { 0 })?;
+
         Ok(ExecutionResult::Next(4))
     }
 
@@ -300,6 +275,7 @@ impl CPU {
         trace!("          res: {:#06X}", sum);
 
         self.set_value_in_address(raw_a, sum)?;
+
         Ok(ExecutionResult::Next(4))
     }
 
@@ -350,14 +326,16 @@ impl CPU {
     }
 
     // rmem: 15 a b - read memory at address <b> and write it to <a>
-    fn rmem(&mut self, raw_a: u16, b: u16) -> Result<ExecutionResult, CPUError> {
-        trace!("{:#06X}: rmem ({:#06X}, {:#06X})", self.current_address, raw_a, b);
+    fn rmem(&mut self, raw_a: u16, raw_b: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: rmem ({:#06X}, {:#06X})", self.current_address, raw_a, raw_b);
 
-        let raw_value = self.get_value_from_address(b)?;
+        let raw_value = self.get_value_from_address(raw_b)?;
         let value = self.from_raw_to_u16(raw_value)?;
+
         trace!("          res: {:#06X}", value);
 
         self.set_value_in_address(raw_a, value)?;
+
         Ok(ExecutionResult::Next(3))
     }
 
@@ -465,20 +443,21 @@ mod tests {
             assert_eq!(number, 0x10);
         }
     }
+    /*
+        #[test]
+        fn test_stack() {
+            let mut cpu = CPU::new(Rc::new(RefCell::new(Memory::default())));
 
-    #[test]
-    fn test_stack() {
-        let mut cpu = CPU::new(Rc::new(RefCell::new(Memory::default())));
+            assert_eq!(cpu.pop(), None);
 
-        assert_eq!(cpu.pop(), None);
+            cpu.push(1);
+            cpu.push(2);
+            cpu.push(3);
 
-        cpu.push(1);
-        cpu.push(2);
-        cpu.push(3);
-
-        assert_eq!(cpu.pop(), Some(3));
-        assert_eq!(cpu.pop(), Some(2));
-        assert_eq!(cpu.pop(), Some(1));
-        assert_eq!(cpu.pop(), None);
-    }
+            assert_eq!(cpu.pop(), Some(3));
+            assert_eq!(cpu.pop(), Some(2));
+            assert_eq!(cpu.pop(), Some(1));
+            assert_eq!(cpu.pop(), None);
+        }
+     */
 }
