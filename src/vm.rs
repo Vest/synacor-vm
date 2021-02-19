@@ -51,13 +51,24 @@ impl VirtualMachine {
     pub fn next_step(&mut self) -> Result<bool, VirtualMachineError> {
         match self.cpu.execute() {
             Ok(to_stop) => Ok(to_stop),
-            Err(_) => Err(VirtualMachineError::GeneralError)
+            Err(err) => {
+                eprintln!("CPU error {:?}", err);
+                Err(VirtualMachineError::GeneralError)
+            }
         }
     }
 
     pub fn run(&mut self) {
         while let Ok(to_stop) = self.next_step() {
             if to_stop {
+                break;
+            }
+        }
+    }
+
+    pub fn run_until(&mut self, at: u16) {
+        while let Ok(to_stop) = self.next_step() {
+            if to_stop || self.get_current_address() >= at {
                 break;
             }
         }

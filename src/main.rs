@@ -32,14 +32,24 @@ fn main() {
                 println!("\n{0:#6} / {0:#06X}", vm.get_current_address());
             }
             "run" => vm.run(),
-            _ => {
-                match vm.next_step() {
-                    Ok(to_stop) if to_stop => break,
-                    Err(err) => {
-                        eprintln!("Unexpected error: {:?}\n", err);
-                        exit(-1);
+            buf @ _ => {
+                if buf.starts_with("until ") {
+                    if let Ok(pos) = u16::from_str_radix(buf.trim_start_matches("until 0x"), 16) {
+                        vm.run_until(pos);
+                    } else if let Ok(pos) = u16::from_str_radix(buf.trim_start_matches("until "), 10) {
+                        vm.run_until(pos);
+                    } else {
+                        eprintln!("Couldn't parse the command: {}", buf);
                     }
-                    _ => {}
+                } else {
+                    match vm.next_step() {
+                        Ok(to_stop) if to_stop => break,
+                        Err(err) => {
+                            eprintln!("Unexpected error: {:?}\n", err);
+                            exit(-1);
+                        }
+                        _ => {}
+                    }
                 }
             }
         }

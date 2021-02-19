@@ -145,6 +145,7 @@ impl CPU {
             13 => self.or(a?, b?, c?),
             14 => self.not(a?, b?),
             15 => self.rmem(a?, b?),
+            16 => self.wmem(a?, b?),
             17 => self.call(a?),
             19 => self.out(a?),
             21 => self.noop(),
@@ -329,12 +330,26 @@ impl CPU {
     fn rmem(&mut self, raw_a: u16, raw_b: u16) -> Result<ExecutionResult, CPUError> {
         trace!("{:#06X}: rmem ({:#06X}, {:#06X})", self.current_address, raw_a, raw_b);
 
-        let raw_value = self.get_value_from_address(raw_b)?;
-        let value = self.from_raw_to_u16(raw_value)?;
+        let b = self.from_raw_to_u16(raw_b)?;
+        let value = self.get_value_from_address(b)?;
 
-        trace!("          res: {:#06X}", value);
+        trace!("          b: {:#06X}, res: {:#06X}", b, value);
 
         self.set_value_in_address(raw_a, value)?;
+
+        Ok(ExecutionResult::Next(3))
+    }
+
+    // wmem: 16 a b - write the value from <b> into memory at address <a>
+    fn wmem(&mut self, raw_a: u16, raw_b: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: wmem ({:#06X}, {:#06X})", self.current_address, raw_a, raw_b);
+
+        let a = self.get_value_from_address(raw_a)?;
+        let b = self.from_raw_to_u16(raw_b)?;
+
+        trace!("          a: {:#06X}, b: {:#06X}", a, b);
+
+        self.set_value_in_address(a, b)?;
 
         Ok(ExecutionResult::Next(3))
     }
