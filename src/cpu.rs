@@ -147,6 +147,7 @@ impl CPU {
             15 => self.rmem(a?, b?),
             16 => self.wmem(a?, b?),
             17 => self.call(a?),
+            18 => self.ret(),
             19 => self.out(a?),
             21 => self.noop(),
 
@@ -173,9 +174,11 @@ impl CPU {
     }
 
     // set: 1 a b - set register <a> to the value of <b>
-    fn set(&mut self, raw_a: u16, b: u16) -> Result<ExecutionResult, CPUError> {
-        trace!("{:#06X}: set ({:#06X}, {:#06X})", self.current_address, raw_a, b);
+    fn set(&mut self, raw_a: u16, raw_b: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: set ({:#06X}, {:#06X})", self.current_address, raw_a, raw_b);
 
+        let b = self.from_raw_to_u16(raw_b)?;
+        trace!("          b: {:#06X}", b);
         let _ = self.set_value_in_address(raw_a, b)?;
 
         Ok(ExecutionResult::Next(3))
@@ -225,27 +228,29 @@ impl CPU {
         let b = self.from_raw_to_u16(raw_b)?;
         let c = self.from_raw_to_u16(raw_c)?;
 
-        if b > c {
-            self.set_value_in_address(raw_a, 1)?;
-        } else {
-            self.set_value_in_address(raw_a, 0)?;
-        }
+        self.set_value_in_address(raw_a,
+                                  if b > c { 1 } else { 0 })?;
+
         Ok(ExecutionResult::Next(4))
     }
 
     // jmp: 6 a - jump to <a>
-    fn jmp(&self, a: u16) -> Result<ExecutionResult, CPUError> {
-        trace!("{:#06X}: jmp ({:#06X})", self.current_address, a);
+    fn jmp(&self, raw_a: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: jmp ({:#06X})", self.current_address, raw_a);
+
+        let a = self.from_raw_to_u16(raw_a)?;
+        trace!("          a: {:#06X}", a);
 
         Ok(ExecutionResult::Jump(a))
     }
 
     // jt: 7 a b - if <a> is nonzero, jump to <b>
-    fn jt(&self, raw_a: u16, b: u16) -> Result<ExecutionResult, CPUError> {
-        trace!("{:#06X}: jt ({:#06X}, {:#06X})", self.current_address, raw_a, b);
+    fn jt(&self, raw_a: u16, raw_b: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: jt ({:#06X}, {:#06X})", self.current_address, raw_a, raw_b);
 
         let a = self.from_raw_to_u16(raw_a)?;
-        trace!("          a: {:#06X}", a);
+        let b = self.from_raw_to_u16(raw_b)?;
+        trace!("          a: {:#06X}, b: {:#06X}", a, b);
 
         Ok(if a != 0 {
             ExecutionResult::Jump(b)
@@ -255,11 +260,12 @@ impl CPU {
     }
 
     // jf: 8 a b - if <a> is zero, jump to <b>
-    fn jf(&self, raw_a: u16, b: u16) -> Result<ExecutionResult, CPUError> {
-        trace!("{:#06X}: jf ({:#06X}, {:#06X})", self.current_address, raw_a, b);
+    fn jf(&self, raw_a: u16, raw_b: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: jf ({:#06X}, {:#06X})", self.current_address, raw_a, raw_b);
 
         let a = self.from_raw_to_u16(raw_a)?;
-        trace!("          a: {:#06X}", a);
+        let b = self.from_raw_to_u16(raw_b)?;
+        trace!("          a: {:#06X}, b: {:#06X}", a, b);
 
         Ok(if a == 0 {
             ExecutionResult::Jump(b)
@@ -269,11 +275,14 @@ impl CPU {
     }
 
     // add: 9 a b c - assign into <a> the sum of <b> and <c> (modulo 32768)
-    fn add(&mut self, raw_a: u16, b: u16, c: u16) -> Result<ExecutionResult, CPUError> {
-        trace!("{:#06X}: add ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, b, c);
+    fn add(&mut self, raw_a: u16, raw_b: u16, raw_c: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: add ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, raw_b, raw_c);
+
+        let b = self.from_raw_to_u16(raw_b)?;
+        let c = self.from_raw_to_u16(raw_c)?;
 
         let sum = b.wrapping_add(c) & 0x7FFF;
-        trace!("          res: {:#06X}", sum);
+        trace!("          b: {:#06X}, c: {:#06X}, res: {:#06X}", b, c, sum);
 
         self.set_value_in_address(raw_a, sum)?;
 
@@ -281,11 +290,14 @@ impl CPU {
     }
 
     // mult: 10 a b c - store into <a> the product of <b> and <c> (modulo 32768)
-    fn mult(&mut self, raw_a: u16, b: u16, c: u16) -> Result<ExecutionResult, CPUError> {
-        trace!("{:#06X}: mult ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, b, c);
+    fn mult(&mut self, raw_a: u16, raw_b: u16, raw_c: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: mult ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, raw_b, raw_c);
+
+        let b = self.from_raw_to_u16(raw_b)?;
+        let c = self.from_raw_to_u16(raw_c)?;
 
         let mult = b.wrapping_mul(c) & 0x7FFF;
-        trace!("          res: {:#06X}", mult);
+        trace!("          b: {:#06X}, c: {:#06X}, res: {:#06X}", b, c, mult);
 
         self.set_value_in_address(raw_a, mult)?;
         Ok(ExecutionResult::Next(4))
@@ -303,26 +315,40 @@ impl CPU {
     }
 
     // and: 12 a b c - stores into <a> the bitwise and of <b> and <c>
-    fn and(&mut self, raw_a: u16, b: u16, c: u16) -> Result<ExecutionResult, CPUError> {
-        trace!("{:#06X}: and ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, b, c);
+    fn and(&mut self, raw_a: u16, raw_b: u16, raw_c: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: and ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, raw_b, raw_c);
 
-        self.set_value_in_address(raw_a, b & c)?;
+        let b = self.from_raw_to_u16(raw_b)?;
+        let c = self.from_raw_to_u16(raw_c)?;
+        let and = b & c;
+        trace!("          b: {:#06X}, c: {:#06X}, res: {:#06X}", b, c, and);
+
+        self.set_value_in_address(raw_a, and)?;
         Ok(ExecutionResult::Next(4))
     }
 
     // or: 13 a b c - stores into <a> the bitwise or of <b> and <c>
-    fn or(&mut self, raw_a: u16, b: u16, c: u16) -> Result<ExecutionResult, CPUError> {
-        trace!("{:#06X}: or ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, b, c);
+    fn or(&mut self, raw_a: u16, raw_b: u16, raw_c: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: or ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, raw_b, raw_c);
 
-        self.set_value_in_address(raw_a, b | c)?;
+        let b = self.from_raw_to_u16(raw_b)?;
+        let c = self.from_raw_to_u16(raw_c)?;
+        let or = b | c;
+        trace!("          b: {:#06X}, c: {:#06X}, res: {:#06X}", b, c, or);
+
+        self.set_value_in_address(raw_a, or)?;
         Ok(ExecutionResult::Next(4))
     }
 
     // not: 14 a b - stores 15-bit bitwise inverse of <b> in <a>
-    fn not(&mut self, raw_a: u16, b: u16) -> Result<ExecutionResult, CPUError> {
-        trace!("{:#06X}: not ({:#06X}, {:#06X})", self.current_address, raw_a, b);
+    fn not(&mut self, raw_a: u16, raw_b: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: not ({:#06X}, {:#06X})", self.current_address, raw_a, raw_b);
 
-        self.set_value_in_address(raw_a, !b & 0x7FFF)?;
+        let b = self.from_raw_to_u16(raw_b)?;
+        let not = !b & 0x7FFF;
+        trace!("          b: {:#06X}, res: {:#06X}", b, not);
+
+        self.set_value_in_address(raw_a, not)?;
         Ok(ExecutionResult::Next(3))
     }
 
@@ -362,6 +388,17 @@ impl CPU {
 
         self.stack.push(self.current_address + 2);
         Ok(ExecutionResult::Jump(a))
+    }
+
+    // ret: 18 - remove the top element from the stack and jump to it; empty stack = halt
+    fn ret(&mut self) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: ret", self.current_address);
+
+        if let Some(a) = self.stack.pop() {
+            Ok(ExecutionResult::Jump(a))
+        } else {
+            Ok(ExecutionResult::Stop)
+        }
     }
 
     // out: 19 a - write the character represented by ascii code <a> to the terminal
