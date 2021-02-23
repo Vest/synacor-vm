@@ -370,7 +370,7 @@ impl CPU {
     fn wmem(&mut self, raw_a: u16, raw_b: u16) -> Result<ExecutionResult, CPUError> {
         trace!("{:#06X}: wmem ({:#06X}, {:#06X})", self.current_address, raw_a, raw_b);
 
-        let a = self.get_value_from_address(raw_a)?;
+        let a = self.from_raw_to_u16(raw_a)?;
         let b = self.from_raw_to_u16(raw_b)?;
 
         trace!("          a: {:#06X}, b: {:#06X}", a, b);
