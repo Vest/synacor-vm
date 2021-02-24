@@ -114,6 +114,7 @@ impl CPU {
         let a = self.get_value_from_address(self.current_address + 1);
         let b = self.get_value_from_address(self.current_address + 2);
         let c = self.get_value_from_address(self.current_address + 3);
+
         /*
                     {
                         let a = self.get_value_from_address(self.current_address + 1)?;
@@ -304,11 +305,14 @@ impl CPU {
     }
 
     // mod: 11 a b c - store into <a> the remainder of <b> divided by <c>
-    fn modulo(&mut self, raw_a: u16, b: u16, c: u16) -> Result<ExecutionResult, CPUError> {
-        trace!("{:#06X}: mod ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, b, c);
+    fn modulo(&mut self, raw_a: u16, raw_b: u16, raw_c: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: mod ({:#06X}, {:#06X}, {:#06X})", self.current_address, raw_a, raw_b, raw_c);
+
+        let b = self.from_raw_to_u16(raw_b)?;
+        let c = self.from_raw_to_u16(raw_c)?;
 
         let rem = b.wrapping_rem(c);
-        trace!("          res: {:#06X}", rem);
+        trace!("          b: {:#06X}, c: {:#06X}, res: {:#06X}", b, c, rem);
 
         self.set_value_in_address(raw_a, rem)?;
         Ok(ExecutionResult::Next(4))
@@ -402,12 +406,15 @@ impl CPU {
     }
 
     // out: 19 a - write the character represented by ascii code <a> to the terminal
-    fn out(&self, a: u16) -> Result<ExecutionResult, CPUError> {
-        trace!("{:#06X}: out ({:#06X})", self.current_address, a);
+    fn out(&self, raw_a: u16) -> Result<ExecutionResult, CPUError> {
+        trace!("{:#06X}: out ({:#06X})", self.current_address, raw_a);
 
-        let a = (a as u8) as char;
+        let a = self.from_raw_to_u16(raw_a)?;
+        let c = (a as u8) as char;
 
-        print!("{}", a);
+        trace!("          a: {:#06X}, res: {}", a, c);
+
+        print!("{}", c);
 
         Ok(ExecutionResult::Next(2))
     }
