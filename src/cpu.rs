@@ -150,6 +150,7 @@ impl CPU {
             17 => self.call(a?),
             18 => self.ret(),
             19 => self.out(a?),
+            20 => self.inp(a?),
             21 => self.noop(),
 
             _ => Err(CPUError::UnknownOpCode {
@@ -415,6 +416,22 @@ impl CPU {
         trace!("          a: {:#06X}, res: {}", a, c);
 
         print!("{}", c);
+
+        Ok(ExecutionResult::Next(2))
+    }
+
+    // in: in: 20 a - read a character from the terminal and write its ascii code to <a>; it can be
+    // assumed that once input starts, it will continue until a newline is encountered; this means
+    // that you can safely read whole lines from the keyboard and trust that they will be fully read
+    fn inp(&mut self, raw_a: u16) -> Result<ExecutionResult, CPUError> {
+        use std::io::Read;
+
+        if let Some(Ok(c)) = std::io::stdin().bytes().next() {
+            self.set_value_in_address(raw_a, c as u16);
+        } else {
+            self.set_value_in_address(raw_a, 0);
+        }
+
 
         Ok(ExecutionResult::Next(2))
     }
